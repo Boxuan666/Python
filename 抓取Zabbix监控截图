@@ -1,0 +1,95 @@
+from pyzabbix import ZabbixAPI
+import http.cookiejar
+from datetime import datetime
+import os
+import csv
+import urllib.request
+import urllib
+
+def main():
+    #调用函数登录API
+    API = login()
+    csv_name = input('请输入csv文件名,(例如Test.csv)： ')
+    #创建存放路径
+    file_path = r'C:\ZabbixScreen' + '_' + datetime.today().strftime('%Y-%m-%d_%H%M')
+    os.mkdir(file_path)
+    #获取图片截取时间
+    start_time = input('\n提示：输入格式要求：2017-12-14 13:50,如果没有小时和分钟的要求可以不输入。\n请输入开始截取的时间: ')
+    end_time = input('请输入截取结束的时间: ')
+
+    #判断时间长度
+    if len(start_time) >= 12:
+        start_time = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+        end_time = datetime.strptime(end_time, "%Y-%m-%d %H:%M")
+    else:
+        start_time = datetime.strptime(start_time, "%Y-%m-%d")
+        end_time = datetime.strptime(end_time, "%Y-%m-%d")
+    #计算period
+    period_sec = end_time - start_time
+    period = period_sec.days*24*3600 + period_sec.seconds
+    #转换时间格式
+    start_time = start_time.strftime('%Y%m%d%H%M%S')
+    #从csv文件中读取主机名与Item名
+    with open(csv_name) as csvfile:
+        os.chdir(file_path)
+        host_list = []
+        item_list =[]
+        Item = []
+        for x in csv.reader(csvfile, delimiter=','):
+                host_list.append(x[0])
+                item_list.append(x[1])
+        for x in item_list:
+            if x != "":
+                Item.append(x)
+    #调用相应函数获取图片
+    for Item in Item:
+        for HostName in host_list:
+            graphid = host_id(API, HostName, Item)
+            get_image(graphid, start_time, period, HostName, Item)
+    print('图片下载完成，路径为：%s' %file_path)
+            
+def login():
+    #登录API
+    API = ZabbixAPI('http://127.0.0.1/zabbix')
+    API.login('username','password')
+    return API
+    
+def host_id(API, HostName, Item):
+    graphid = []
+    host_id = API.host.get(filter={'host':HostName},output='hostid')[0]['hostid']
+    for x in API.graph.get(filter={'hostid':host_id}):
+        if Item in x['name']:
+            graphid.append(x['graphid'])
+    return graphid
+        
+def get_image(graphid, start_time, period, HostName, Item):
+    #URL地址
+    login_url = 'http://127.0.0.1/zabbix/index.php'
+    download_url = 'http://127.0.0.1/zabbix/chart2.php'
+    cookie = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie))
+
+    params = {
+        "name": 'username',
+        "password": 'password',
+        "autologin": 1,
+        "enter": "Sign in"
+    }
+
+    response=opener.open(login_url, urllib.parse.urlencode(params).encode('utf-8'))
+
+    for graphid in graphid:
+        image_params = {
+            'graphid': graphid,
+            'period': period,
+            'stime': start_time,
+            'width': 1200,
+            'height': 446
+        }
+        images = opener.open(download_url, urllib.parse.urlencode(image_params).encode('utf-8')).read()
+        file_name = ('%s_%s.jpg' %(HostName, Item))
+        with open(file_name, 'wb') as f:
+            f.write(images)
+        
+if __name__ == "__main__":
+    main()
